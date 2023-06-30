@@ -1,8 +1,8 @@
 Package: ResIN
 Type: Package
 Title: Response Item Networks ('ResIN')
-Version: 0.1.0
-Authors@R: c(person("Philip", "Warncke", email = "pwarncke@live.unc.edu", role = c("cre", "aut")), person("Dino", "Carpentras", role = "aut"))
+Version: 1.1.0
+Authors@R: c(person("Philip", "Warncke", email = "pwarncke@live.unc.edu", role = c("cre", "aut")), person("Dino", "Carpentras", role = "aut"), person("Adrian", "Lüders", role = "aut"))
 Maintainer: Philip Warncke <pwarncke@live.unc.edu>
 Description: Contains various tools to perform and visualize Response Item Networks ('ResIN's'). 'ResIN' binarizes ordered-categorical and qualitative response choices from (survey) data, calculates pairwise associations and maps the location of each item response as a node in a force-directed network. Please refer to <https://www.resinmethod.net/> for more details.
 License: GPL-3
@@ -18,8 +18,9 @@ RoxygenNote: 7.2.3
 Suggests: knitr, rmarkdown
 VignetteBuilder: knitr
 NeedsCompilation: no
-Packaged: 2023-05-09 14:21:59 UTC; philip
+Packaged: 2023-06-30 09:49:27 UTC; philip
 Author: Philip Warncke [cre, aut],
-  Dino Carpentras [aut]
+  Dino Carpentras [aut],
+  Adrian Lüders [aut]
 Repository: CRAN
-Date/Publication: 2023-05-10 13:50:06 UTC
+Date/Publication: 2023-06-30 10:10:02 UTC
