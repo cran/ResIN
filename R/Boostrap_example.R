@@ -1,4 +1,4 @@
-#' Output example for a bootstrapping analysis conducted with the ResIN package.
+#' Output example for a bootstrapping analysis conducted with the ResIN package
 #'
 #'
 #' @docType data
@@ -12,6 +12,6 @@
 #' @examples
 #'
 #' data(Bootstrap_example)
-#' str(Bootstrap_example)
+#' names(Bootstrap_example[[1]])
 #'
 "Bootstrap_example"

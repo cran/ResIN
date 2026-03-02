@@ -1,30 +1,27 @@
-#' @title ResIN
+#' @title Flagship function that implements Response Item Network (ResIN) analysis
 #'
-#' @description Performs Response Item-Network (ResIN) analysis
+#' @description Performs Response Item-Network (ResIN) analysis in one go. Users minimally need to supply a dataframe or matrix of discrete response data. If needed for step-wise analysis, all intermediate outputs can still be accessed as part of the aux_objects output list.
 #'
 #' @param df A data-frame object containing the raw data.
 #' @param node_vars An optional character vector detailing the attitude item columns to be selected for ResIN analysis (i.e. the subset of attitude variables in df).
 #' @param left_anchor An optional character scalar indicating a particular response node which determines the spatial orientation of the ResIN latent space. If this response node does not appear on the left-hand side, the x-plane will be inverted. This ensures consistent interpretation of the latent space across multiple iterations (e.g. in bootstrapping analysis). Defaults to NULL (no adjustment to orientation is taken.)
-#' @param cor_method Which correlation method should be used? Defaults to "auto" which applies the \code{cor_auto} function from the \code{qgraph} package. Possible arguments are \code{"auto"}, \code{"pearson"}, \code{"kendall"}, and \code{"spearman"}.
-#' @param weights An optional continuous vector of survey weights. Should have the same length as number of observations in df. If weights are provided, weighted correlation matrix will be estimated with the \code{weightedCorr} function from the \code{wCorr} package.
-#' @param method_wCorr If weights are supplied, which method for weighted correlations should be used? Defaults to \code{"Pearson"}. See \code{wCorr::weightedCorr} for all correlation options.
-#' @param poly_ncor How many CPU cores should be used to estimate polychoric correlation matrix? Only used if \code{cor_method = "polychoric"}.
-#' @param neg_offset Should negative correlations be offset to avoid small correlation pairs disappearing? Defaults to \code{0}. Any positive number between 0 and 1 may be supplied instead.
-#' @param ResIN_scores Should spatial scores be calculated for every individual. Defaults to TRUE. Function obtains the mean positional score on the major (x-axis) and minor (y-axis). Further versions of this package will include more sophisticated scoring techniques.
-#' @param remove_negative Should all negative correlations be removed? Defaults to TRUE (highly recommended). Setting to FALSE makes it impossible to estimate a force-directed network layout. Function will use igraph::layout_nicely instead.
-#' @param EBICglasso Should a sparse, Gaussian-LASSO ResIN network be estimated? Defaults to FALSE. If set to TRUE, \code{EBICglasso} function from the \code{qgraph} packages performs regularization on (nearest positive-semi-definite) ResIN correlation matrix.
-#' @param EBICglasso_arglist An argument list feeding additional instructions to the \code{EBICglasso} function if \code{EBICglasso} is set to TRUE.
-#' @param remove_nonsignificant Optionally, should non-significant edges be removed from the ResIN network? Defaults to FALSE. Note that this option is incompatible with EBICglasso and weighted correlations.
-#' @param sign_threshold At what p-value threshold should non-significant edges be removed? Defaults to 0.05.
-#' @param node_covars An optional character string selecting quantitative covariates that can be used to enhance ResIN analysis. Typically, these covariates provide grouped summary statistics for item response nodes. (E.g.: What is the average age or income level of respondents who selected a particular item response?) Variable names specified here should match existing columns in \code{df}.
+#' @param cor_method Which correlation method should be used? Current implementation supports "pearson" (default) and "polychoric". Please note that polychoric correlations are currently unsupported for weighted analysis.
+#' @param missing_cor Character scalar controlling missing-data handling for correlation estimation. Either \code{"pairwise"} (default) or  \code{"listwise"}.
+#' @param weights Optional survey weights. Can be either \code{NULL} (default), a numeric vector of length \code{nrow(df)}, or a character scalar naming a weights column in \code{df}. If a column name is supplied and \code{node_vars = NULL}, the weights column is automatically excluded from the response-node variables used for ResIN estimation.
+#' @param offset Optional off-set to correlation edges to manually adjust for over- or under-fitting the network. Defaults to \code{0}. Supplying a value between -1 and 0 globally reduces edge values by that amount, leading to the elimination of all positive  edges below that value, resulting in a more sparse network. (However, we strongly recommend setting \code{remove_nonsignificant=TRUE} instead for a more principled approach to ensuring optimal network sparsity as global thresholds have heuristic value at best). Alternatively, a value between 0 and 1 enforces a positive offset, resulting in more dense (but potentially over-fitted) networks.
+#' @param ResIN_scores Logical; should spatial scores be calculated for every individual. Defaults to TRUE. Function obtains the mean positional score on the major (x-axis) and minor (y-axis). Current package implementation also provides empirical Bayesian scores via James-Stein shrinkage (\code{eb_x}) and heuristic shrinkage (\code{heur_x}) scores. Please refer to the package [vignette]https://pwarncke77.github.io/ResIN/articles/ResIN-VIGNETTE.html#spatial-interpretation-and-individual-latent-space-scores for further details.
+#' @param remove_nonsignificant Logical; should non-significant edges be removed from the ResIN network? Defaults to FALSE. For weighted Pearson correlations, p-values are approximated using a weighted effective sample size. For currently unsupported polychoric configurations, ResIN falls back to Pearson and issues a warning.
+#' @param remove_nonsignificant_method Character scalar specifying how p-values are thresholded when \code{remove_nonsignificant = TRUE}. Defaults to \code{"default"}, which prunes edges with raw p-values greater than \code{sign_threshold} (i.e., retains edges with \code{p <= sign_threshold}). If set to \code{"bh"}, p-values are adjusted using the Benjamini--Hochberg procedure; edges are retained only if the adjusted p-value is less than or equal to \code{sign_threshold}, interpreted as the target false discovery rate \eqn{q}. This provides multiplicity control across all tested edges and is typically more principled than using unadjusted p-values, but may be slightly slower. See \code{\link[stats]{p.adjust}} for details.
+#' @param sign_threshold Numeric scalar controlling the pruning threshold used when \code{remove_nonsignificant = TRUE}. For \code{remove_nonsignificant_method = "default"}, this is the raw p-value cutoff (e.g., \code{0.05}). For \code{remove_nonsignificant_method = "bh"}, this is the target false discovery rate level \eqn{q} (e.g., \code{0.05}), applied to Benjamini--Hochberg adjusted p-values.
+#' @param node_covars An optional character string selecting quantitative co-variates that can be used to enhance ResIN analysis. Typically, these covariates provide grouped summary statistics for item response nodes. (E.g.: What is the average age or income level of respondents who selected a particular item response?) Variable names specified here should match existing columns in \code{df}.
 #' @param node_costats If any \code{node_covars} are selected, what summary statistics should be estimated from them? Argument should be a character vector and call a base-R function. (E.g. \code{"mean"}, \code{"median"}, \code{"sd"}). Each element specified in \code{node_costats} is applied to each element in \code{node_covars} and the out-put is stored as a node-level summary statistic in the \code{ResIN_nodeframe}. The extra columns in \code{ResIN_nodeframe} are labeled according to the following template: "covariate name"_"statistic". So for the respondents mean age, the corresponding column in \code{ResIN_nodeframe} would be labeled as "age_mean".
 #' @param network_stats Should common node- and graph level network statistics be extracted? Calls \code{qgraph::centrality_auto} and \code{DirectedClustering::ClustF} to the ResIN graph object to extract node-level betweenness, closeness, strength centrality, as well as the mean and standard deviation of these scores at the network level. Also estimates network expected influence, average path length, and global clustering coefficients. Defaults to TRUE. Set to FALSE if estimation takes a long time.
 #' @param detect_clusters Optional, should community detection be performed on item response network? Defaults to FALSE. If set to TRUE, performs a clustering method from the [igraph](https://igraph.org/r/doc/cluster_leading_eigen.html) library and stores the results in the \code{ResIN_nodeframe} output.
 #' @param cluster_method A character scalar specifying the [igraph-based](https://igraph.org/r/doc/communities.html) community detection function.
 #' @param cluster_arglist An optional list specifying additional arguments to the selected [igraph](https://igraph.org/r/doc/communities.html) clustering method.
 #' @param cluster_assignment Should individual (survey) respondents be assigned to different clusters? If set to TRUE, function will generate an n*c matrix of probabilities for each respondent to be assigned to one of c clusters. Furthermore, a vector of length n is generated displaying the most likely cluster respondents belong to. In case of a tie between one or more clusters, a very small amount of random noise determines assignment. Both matrix and vectors are added to the \code{aux_objects} list. Defaults to FALSE and will be ignored if \code{detect_clusters} is set to FALSE.
-#' @param generate_ggplot Should a ggplot-based visualization of the ResIN network be generated? Defaults to TRUE.
-#' @param plot_ggplot Should a basic ggplot of the ResIN network be plotted? Defaults to TRUE. If set to FALSE, the ggplot object will not be directly returned to the console. (However, if generate_ggplot=TRUE, the plot will still be generated and stored alongside the other output objects.)
+#' @param generate_ggplot Logical; should a ggplot-based visualization of the ResIN network be generated? Defaults to TRUE.
+#' @param plot_ggplot Logical; should a basic ggplot of the ResIN network be plotted? Defaults to TRUE. If set to FALSE, the ggplot object will not be directly returned to the console. (However, if generate_ggplot=TRUE, the plot will still be generated and stored alongside the other output objects.)
 #' @param plot_whichstat Should a particular node-level metric be color-visualized in the ggplot output? For node cluster, specify "cluster". For the same Likert response choices or options, specify "choices". For a particular node-level co-variate please specify the name of the particular element in \code{node_covars} followed by a "_" and the specific \code{node_costats} you would like to visualize. For instance if you want the visualize average age at the node-level, you should specify "age_mean". To colorize by node centrality statistics, possible choices are "Strength", "Betweenness", "Closeness", and "ExpectedInfluence". Defaults to NULL. Make sure to supply appropriate choices to \code{node_covars}, \code{node_costats}, \code{detect_clusters}, and/or \code{network_stats} prior to setting this argument.
 #' @param plot_edgestat Should the thickness of the edges be adjusted according to a particular co-statistic? Defaults to NULL. Possible choices are "weight" for the bi-variate correlation strength, and "edgebetweenness"
 #' @param color_palette Optionally, you may specify the ggplot2 color palette to be applied to the plot. All options contained in [\code{RColorBrewer}](https://cran.r-project.org/web/packages/RColorBrewer/RColorBrewer.pdf) (for discrete colors such as cluster assignments) and [\code{ggplot2::scale_colour_distiller}](https://ggplot2.tidyverse.org/reference/scale_brewer.html) are supported. Defaults to "RdBu".
@@ -32,11 +29,14 @@
 #' @param plot_responselabels Should response labels be plotted via \code{geom_text}? Defaults to TRUE. It is recommended to set to FALSE if the network possesses a lot of nodes and/or long response choice names.
 #' @param response_levels An optional character vector specifying the correct order of global response levels. Only useful if all node-items follow the same convention (e.g. ranging from "strong disagreement" to "strong agreement"). The supplied vector should have the same length as the total number of response options and supply these (matching exactly) in the correct order. E.g. c("Strongly Agree", "Somewhat Agree", "Neutral", "Somewhat Disagree", "Strongly Disagree"). Defaults to NULL.
 #' @param plot_title Optionally, a character scalar specifying the title of the ggplot output. Defaults to "ResIN plot".
-#' @param bipartite Should a bipartite graph be produced in addition to classic ResIN graph? Defaults to FALSE. If set to TRUE, an  [igraph](https://igraph.org/r/doc/) bipartite graph with response options as node type 1 and participants as node type 2 will be generated and included in the output list. Further, an object called \code{coordinate_df} with spatial coordinates of respondents and a plot-able \code{ggraph}-object called \code{bipartite_ggraph} are generated if set to TRUE.
-#' @param save_input Optionally, should input data and function arguments be saved (this is necessary for running ResIN_boots_prepare function). Defaults to TRUE.
+#' @param bipartite Logical; should a bipartite graph be produced in addition to classic ResIN graph? Defaults to FALSE. If set to TRUE, an  [igraph](https://igraph.org/r/doc/) bipartite graph with response options as node type 1 and participants as node type 2 will be generated and included in the output list. Further, an object called \code{coordinate_df} with spatial coordinates of respondents and a plot-able \code{ggraph}-object called \code{bipartite_ggraph} are generated if set to TRUE.
+#' @param remove_negative Logical; should all negative correlations be removed? Defaults to TRUE (highly recommended). Setting to FALSE makes it impossible to estimate a force-directed network layout. Function will use igraph::layout_nicely instead.
+#' @param save_input Logical; should input data and function arguments be saved (this is necessary for running ResIN_boots_prepare function). Defaults to TRUE.
 #' @param seed Random seed for force-directed algorithm. Defaults to NULL (no seed is set.) If scalar integer is supplied, that seed will be set prior to analysis.
+#' @param EBICglasso Retired as of ResIN 2.3.0 and ignored.
+#' @param EBICglasso_arglist Retired as of ResIN 2.3.0 and ignored.
 #'
-#' @return An edge-list type data-frame, \code{ResIN_edgelist}, a node-level data-frame, \code{ResIN_nodeframe}, an n*2 data-frame of individual-level spatial scores along the major (x) and minor(y) axis, \code{ResIN_scores} a list of graph-level statistics \code{graph_stats} including (\code{graph_structuration}), and centralization (\code{graph_centralization}). Further, a \code{bipartite_output} list which includes an \code{igraph} class bipartite graph (\code{bipartite_igraph}), a data frame, \code{coordinate_df}, with spatial coordinates of respondents, and a plot-able \code{ggraph}-object called \code{bipartite_ggraph} is optionally generated. Lastly, the output includes a list of auxiliary objects, \code{aux_objects}, including the ResIN adjacency matrix (\code{adj_matrix}), a numeric vector detailing which item responses belong to which item (\code{same_items}), and the dummy-coded item-response data-frame (\code{df_dummies}).
+#' @return An edge-list type data-frame, \code{ResIN_edgelist}, a node-level data-frame, \code{ResIN_nodeframe}, an n*2 data-frame of individual-level spatial scores along the major (x) and minor(y) axis, \code{ResIN_scores} a list of graph-level statistics \code{graph_stats} including (\code{graph_structuration}), and centralization (\code{graph_centralization}). Further, a \code{bipartite_output} list which includes an \code{igraph} class bipartite graph (\code{bipartite_igraph}), a data frame, \code{coordinate_df}, with spatial coordinates of respondents, and a plot-able \code{ggraph}-object called \code{bipartite_ggraph} is optionally generated. Lastly, the output includes a list of auxiliary objects, \code{aux_objects}, including the ResIN adjacency matrix (\code{adj_matrix}), a numeric vector detailing which item responses belong to which item (\code{same_items}), and the dummy-coded item-response data-frame (\code{df_dummies}). For reproducibility, (\code{aux_objects$meta} stores a numeric dataframe identifier (\code{df_id}, the random seed, call, and the (\code{ResIN} package version used to create the object.”
 #'
 #' @examples
 #'
@@ -44,56 +44,201 @@
 #' data(lik_data)
 #'
 #' # Apply the ResIN function to toy Likert data:
-#' ResIN_obj <- ResIN(lik_data, cor_method = "spearman", network_stats = TRUE, detect_clusters = TRUE)
+#' ResIN_obj <- ResIN(lik_data, network_stats = TRUE, remove_nonsignificant = TRUE)
 #'
 #' @export
 #' @importFrom ggplot2 "ggplot" "geom_curve" "geom_point" "geom_text" "ggtitle" "scale_color_continuous" "scale_color_discrete" "scale_colour_manual" "aes" "element_blank" "element_text" "theme" "theme_classic" "theme_void" "coord_fixed"
 #' @importFrom dplyr "select" "left_join" "all_of" "mutate" "filter" "%>%" "row_number"
 #' @importFrom tidyr "pivot_longer"
-#' @importFrom stats "complete.cases" "cor" "sd" "prcomp" "cov" "princomp"
+#' @importFrom stats "complete.cases" "cor" "sd" "prcomp" "cov" "princomp" "pt"
 #' @importFrom fastDummies "dummy_cols"
-#' @importFrom qgraph "qgraph" "cor_auto" "centrality_auto" "EBICglasso" "qgraph.layout.fruchtermanreingold"
+#' @importFrom qgraph "qgraph" "centrality_auto" "qgraph.layout.fruchtermanreingold"
 #' @importFrom igraph "graph_from_adjacency_matrix" "graph_from_data_frame" "V" "vcount" "cluster_leading_eigen" "layout_nicely" "layout_with_fr" "membership"
-#' @importFrom wCorr "weightedCorr"
-#' @importFrom Matrix "nearPD"
 #' @importFrom DirectedClustering "ClustF"
-#' @importFrom psych "corr.test"
+#' @importFrom psych "corr.test" "tetrachoric"
 #' @importFrom shadowtext "geom_shadowtext"
 #' @importFrom ggraph "ggraph" "geom_edge_link" "geom_node_point"
 #'
 
-ResIN <- function(df, node_vars = NULL, left_anchor = NULL, cor_method = "pearson", weights = NULL,
-                      method_wCorr = "Pearson", poly_ncor = 1, neg_offset = 0,
-                      ResIN_scores = TRUE, remove_negative = TRUE,
-                      EBICglasso = FALSE, EBICglasso_arglist = NULL,
-                      remove_nonsignificant = FALSE, sign_threshold = 0.05,
-                      node_covars = NULL, node_costats = NULL,
-                      network_stats = TRUE, detect_clusters = FALSE, cluster_method = NULL, cluster_arglist = NULL,
-                      cluster_assignment = TRUE, generate_ggplot = TRUE, plot_ggplot = TRUE,
-                      plot_whichstat = NULL, plot_edgestat = NULL, color_palette = "RdBu", direction = 1, plot_responselabels = TRUE,
-                      response_levels = NULL, plot_title = NULL, bipartite = FALSE, save_input = TRUE, seed = NULL) {
+ResIN <- ResIN <- function(
+    df,
+    node_vars = NULL,
+    left_anchor = NULL,
+    cor_method = "pearson",
+    weights = NULL,
+    missing_cor = "pairwise",
+    offset = 0,
+    ResIN_scores = TRUE,
+    remove_nonsignificant = FALSE,
+    remove_nonsignificant_method = "default",
+    sign_threshold = 0.05,
+    node_covars = NULL,
+    node_costats = NULL,
+    network_stats = TRUE,
+    detect_clusters = FALSE,
+    cluster_method = NULL,
+    cluster_arglist = NULL,
+    cluster_assignment = TRUE,
+    generate_ggplot = TRUE,
+    plot_ggplot = TRUE,
+    plot_whichstat = NULL,
+    plot_edgestat = NULL,
+    color_palette = "RdBu",
+    direction = 1,
+    plot_responselabels = TRUE,
+    response_levels = NULL,
+    plot_title = NULL,
+    bipartite = FALSE,
+    save_input = TRUE,
+    remove_negative = TRUE,
+    EBICglasso = FALSE,
+    EBICglasso_arglist = NULL,
+    seed = NULL
+) {
 
-  if(save_input==TRUE){
-  ResIN_arglist <- list(df = df, node_vars = node_vars, left_anchor = left_anchor, cor_method = cor_method,
-                        weights = weights, method_wCorr = method_wCorr, poly_ncor = poly_ncor, neg_offset = neg_offset,
-                        ResIN_scores = ResIN_scores, remove_negative = remove_negative,
-                        EBICglasso = EBICglasso, EBICglasso_arglist = EBICglasso_arglist,
-                        remove_nonsignificant = remove_nonsignificant, sign_threshold = sign_threshold,
-                        node_covars = node_covars, node_costats = node_costats,
-                        network_stats = network_stats, detect_clusters = detect_clusters,
-                        cluster_method = cluster_method, cluster_arglist = cluster_arglist,
-                        cluster_assignment = cluster_assignment, generate_ggplot = generate_ggplot,
-                        plot_ggplot = plot_ggplot, plot_whichstat = plot_whichstat, plot_edgestat = plot_edgestat,
-                        color_palette = color_palette, direction = direction, plot_responselabels = plot_responselabels,
-                        response_levels = response_levels, plot_title = plot_title, bipartite = bipartite, save_input = save_input, seed = seed)
-
+  # Reproducibility housekeeping
+  ## Storing input parameters
+  if (save_input == TRUE) {
+    ResIN_arglist <- list(
+      df = df,
+      node_vars = node_vars,
+      left_anchor = left_anchor,
+      cor_method = cor_method,
+      weights = weights,
+      missing_cor = missing_cor,
+      offset = offset,
+      ResIN_scores = ResIN_scores,
+      remove_negative = remove_negative,
+      EBICglasso = EBICglasso,
+      EBICglasso_arglist = EBICglasso_arglist,
+      remove_nonsignificant = remove_nonsignificant,
+      sign_threshold = sign_threshold,
+      node_covars = node_covars,
+      node_costats = node_costats,
+      network_stats = network_stats,
+      detect_clusters = detect_clusters,
+      cluster_method = cluster_method,
+      cluster_arglist = cluster_arglist,
+      cluster_assignment = cluster_assignment,
+      generate_ggplot = generate_ggplot,
+      plot_ggplot = plot_ggplot,
+      plot_whichstat = plot_whichstat,
+      plot_edgestat = plot_edgestat,
+      color_palette = color_palette,
+      direction = direction,
+      plot_responselabels = plot_responselabels,
+      response_levels = response_levels,
+      plot_title = plot_title,
+      bipartite = bipartite,
+      save_input = save_input,
+      seed = seed
+    )
   } else {
     ResIN_arglist <- "not stored"
   }
 
   if(!is.null(seed)){
   set.seed(seed)
+  }
+
+  ## Versioning
+  resin_version <- as.character(utils::packageVersion("ResIN"))
+  r_version     <- paste0(R.version$major, ".", R.version$minor)
+
+  ## Adding stable input identifier
+  tmp <- tempfile("ResIN_df_", fileext = ".rds")
+  saveRDS(df, tmp, compress = FALSE)
+  df_id <- unname(tools::md5sum(tmp))
+  unlink(tmp)
+
+  created <- Sys.time()
+
+  ## Retired and removed arguments: EBICglasso
+  if (!is.null(seed)) {
+    old_seed <- if (exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)) get(".Random.seed", envir = .GlobalEnv) else NULL
+    on.exit({
+      if (!is.null(old_seed)) assign(".Random.seed", old_seed, envir = .GlobalEnv)
+    }, add = TRUE)
+    set.seed(seed)
+  }
+
+  if (!missing(EBICglasso) && isTRUE(EBICglasso)) {
+    .Deprecated(
+      msg = paste0(
+        "EBICglasso is retired as of ResIN 2.3.0 and has no effect."
+      )
+    )
+  }
+
+  if (!missing(EBICglasso_arglist) && !is.null(EBICglasso_arglist)) {
+    .Deprecated(
+      msg = "EBICglasso_arglist is retired as of ResIN 2.3.0 and has no effect."
+    )
+  }
+
+  invisible(EBICglasso)
+  invisible(EBICglasso_arglist)
+
+  # Actual begin of ResIN algorithm:
+  weights_name <- NULL
+  weights_from_df <- FALSE
+
+  if (!is.null(weights)) {
+
+    # Case 1: weights supplied as column name in df
+    if (is.character(weights)) {
+      if (length(weights) != 1L || is.na(weights) || !nzchar(weights)) {
+        stop("If supplied as character, weights must be a single non-empty column name in df.",
+             call. = FALSE)
+      }
+
+      weights_name <- weights
+
+      if (!weights_name %in% colnames(df)) {
+        stop("weights='", weights_name, "' was not found in colnames(df).", call. = FALSE)
+      }
+
+      weights <- df[[weights_name]]
+      weights_from_df <- TRUE
+
+      # If node_vars is not explicitly supplied, automatically exclude the weights column
+      if (is.null(node_vars)) {
+        node_vars <- setdiff(colnames(df), weights_name)
+      } else {
+        # If user explicitly included the weights column among node_vars, remove it
+        if (weights_name %in% node_vars) {
+          node_vars <- setdiff(node_vars, weights_name)
+          warning(
+            "The weights column ('", weights_name,
+            "') was removed from node_vars so it is not treated as a ResIN node.",
+            call. = FALSE
+          )
+        }
+      }
     }
+
+    # Case 2: weights supplied as external numeric vector
+    if (!is.character(weights)) {
+      if (!is.numeric(weights) || length(weights) != nrow(df)) {
+        stop("weights must be NULL, a numeric vector of length nrow(df), or a single character naming a weights column in df.",
+             call. = FALSE)
+      }
+    }
+
+    # Common validation (applies after resolving character -> numeric vector)
+    if (!is.numeric(weights)) {
+      stop("Resolved weights must be numeric.", call. = FALSE)
+    }
+    if (any(!is.finite(weights))) {
+      stop("weights must contain only finite values.", call. = FALSE)
+    }
+    if (any(weights < 0)) {
+      stop("weights must be non-negative.", call. = FALSE)
+    }
+    if (all(weights == 0)) {
+      stop("weights cannot be all zero.", call. = FALSE)
+    }
+  }
 
   ## Select response node_vars
   if(is.null(node_vars)) {
@@ -115,98 +260,451 @@ ResIN <- function(df, node_vars = NULL, left_anchor = NULL, cor_method = "pearso
     choices <- factor(choices, levels = response_levels)
   }
 
-  ## Generating correlation matrices
-  if(remove_nonsignificant==FALSE){
 
-  if(is.null(weights)) {
-    if(cor_method == "auto") {
-      res_in_cor <- qgraph::cor_auto(df_dummies, verbose = FALSE)
+  ## ResIN dummy frame correlations depending on user input:
+
+  # validate correlation arguments
+  if (!cor_method %in% c("pearson", "polychoric")) {
+    stop("cor_method must be either 'pearson' or 'polychoric'.", call. = FALSE)
+  }
+  if (!missing_cor %in% c("pairwise", "listwise")) {
+    stop("missing_cor must be either 'pairwise' or 'listwise'.", call. = FALSE)
+  }
+
+  # declare item id per dummy column
+  item_id_per_dummycol <- rep(NA_integer_, ncol(df_dummies))
+  j <- 1L
+  for (i in seq_len(ncol(df_nodes))) {
+    k <- length(levels(factor(df_nodes[, i])))
+    idx <- j:(j + k - 1L)
+    item_id_per_dummycol[idx] <- i
+    j <- j + k
+  }
+
+  # split indices by original item
+  item_blocks <- split(seq_along(item_id_per_dummycol), item_id_per_dummycol)
+
+  # helper: weighted Pearson correlation for one pair + approximate p-value
+  weighted_cor_test_pair <- function(x, y, w, need_p = FALSE) {
+    ok <- is.finite(x) & is.finite(y) & is.finite(w) & (w > 0)
+    x <- x[ok]; y <- y[ok]; w <- w[ok]
+
+    n_pair <- length(x)
+    if (n_pair < 2L) {
+      return(list(r = NA_real_, p = NA_real_, n_pair = n_pair, n_eff = NA_real_))
     }
-    if(cor_method %in% c("pearson", "kendall", "spearman")) {
-      res_in_cor <- cor(df_dummies, method = cor_method, use = "pairwise.complete.obs")
+
+    sw <- sum(w)
+    if (!is.finite(sw) || sw <= 0) {
+      return(list(r = NA_real_, p = NA_real_, n_pair = n_pair, n_eff = NA_real_))
     }
 
-  ### Weighted correlations:
-  } else {
-    res_in_cor <- matrix(NA, ncol(df_dummies), ncol(df_dummies))
+    # Correlation is scale-invariant in weights; normalized weights for effective n
+    wn <- w / sw
 
-    for(i in 1:ncol(df_dummies))  {
-      for(j in 1:ncol(df_dummies))  {
-        temp <- as.data.frame(cbind(df_dummies[, i], df_dummies[, j], df[, weights]))
-        temp <- temp[complete.cases(temp), ]
-        res_in_cor[i, j]  <- wCorr::weightedCorr(temp[, 1], temp[, 2], weights=temp[, 3], method = method_wCorr)
+    mx <- sum(wn * x)
+    my <- sum(wn * y)
+
+    vx <- sum(wn * (x - mx)^2)
+    vy <- sum(wn * (y - my)^2)
+
+    if (!is.finite(vx) || !is.finite(vy) || vx <= 0 || vy <= 0) {
+      return(list(r = NA_real_, p = NA_real_, n_pair = n_pair, n_eff = NA_real_))
+    }
+
+    cov_xy <- sum(wn * (x - mx) * (y - my))
+    r <- cov_xy / sqrt(vx * vy)
+
+    # numerical clamp
+    r <- max(min(r, 1), -1)
+
+    p <- NA_real_
+    n_eff <- NA_real_
+
+    if (isTRUE(need_p)) {
+
+      # Effective sample size for weighted tests
+      denom <- sum(wn^2)
+      if (is.finite(denom) && denom > 0) {
+        n_eff <- 1 / denom
+      }
+
+      if (is.finite(n_eff) && n_eff > 2 && is.finite(r)) {
+        if (abs(r) < 1) {
+          tval <- r * sqrt((n_eff - 2) / (1 - r^2))
+          p <- 2 * stats::pt(-abs(tval), df = n_eff - 2)
+        } else {
+          p <- 0
+        }
       }
     }
-    colnames(res_in_cor) <- colnames(df_dummies)
-    rownames(res_in_cor) <- colnames(df_dummies)
+
+    list(r = r, p = p, n_pair = n_pair, n_eff = n_eff)
   }
 
-  ## Perform regularization (optional)
-  if(EBICglasso==TRUE) {
-    diag(res_in_cor) <- 1
-    res_in_cor <- as.matrix(Matrix::nearPD(res_in_cor)$mat)
+  # helper: weighted Pearson matrix (upper-triangle only + skip same-item pairs)
+  weighted_pearson_matrix <- function(X, w, missing = c("pairwise", "listwise"),
+                                      need_p = FALSE, item_id = NULL) {
+    missing <- match.arg(missing)
+    X <- as.data.frame(X)
 
-    if(is.null(EBICglasso_arglist)) {
-      EBICglasso_arglist <- list(n = nrow(df), gamma = 0.5, penalize.diagonal = FALSE,
-                                 nlambda = 100,
-                                 returnAllResults = FALSE, checkPD = FALSE,
-                                 countDiagonal = FALSE, refit = FALSE,
-                                 threshold = FALSE, verbose = FALSE)
+    p <- ncol(X)
+    R <- matrix(0, p, p)
+    diag(R) <- 1
+    colnames(R) <- colnames(X)
+    rownames(R) <- colnames(X)
+
+    P <- NULL
+    N_pair <- NULL
+    N_eff <- NULL
+    if (isTRUE(need_p)) {
+      P <- matrix(NA_real_, p, p)
+      diag(P) <- 0
+      colnames(P) <- colnames(X); rownames(P) <- colnames(X)
+
+      N_pair <- matrix(NA_real_, p, p)
+      N_eff  <- matrix(NA_real_, p, p)
+      diag(N_pair) <- nrow(X)
+      diag(N_eff)  <- nrow(X)
+      colnames(N_pair) <- rownames(N_pair) <- colnames(X)
+      colnames(N_eff)  <- rownames(N_eff)  <- colnames(X)
     }
-    res_in_cor <- do.call(qgraph::EBICglasso, c(list(S = as.matrix(res_in_cor)),
-                                                EBICglasso_arglist))
+
+    # listwise pre-filter once if requested
+    if (missing == "listwise") {
+      cc <- stats::complete.cases(X) & is.finite(w)
+      X <- X[cc, , drop = FALSE]
+      w <- w[cc]
+    }
+
+    for (i in seq_len(p)) {
+      xi <- X[[i]]
+
+      for (j in i:p) {
+        # skip same-item correlations
+        if (!is.null(item_id) && item_id[i] == item_id[j]) {
+          if (isTRUE(need_p)) {
+            P[i, j] <- P[j, i] <- 0
+          }
+          if (i == j) R[i, j] <- 1
+          next
+        }
+
+        if (i == j) {
+          R[i, j] <- 1
+          if (isTRUE(need_p)) {
+            P[i, j] <- 0
+            N_pair[i, j] <- if (missing == "listwise") nrow(X) else sum(is.finite(xi) & is.finite(w) & w > 0)
+            ww <- w[is.finite(xi) & is.finite(w) & w > 0]
+            if (length(ww) > 0) {
+              wwn <- ww / sum(ww)
+              N_eff[i, j] <- 1 / sum(wwn^2)
+            }
+          }
+          next
+        }
+
+        out <- weighted_cor_test_pair(xi, X[[j]], w, need_p = need_p)
+
+        R[i, j] <- R[j, i] <- out$r
+
+        if (isTRUE(need_p)) {
+          P[i, j] <- P[j, i] <- out$p
+          N_pair[i, j] <- N_pair[j, i] <- out$n_pair
+          N_eff[i, j]  <- N_eff[j, i]  <- out$n_eff
+        }
+      }
+    }
+
+    list(r = R, p = P, n_pair = N_pair, n_eff = N_eff)
   }
-    }else{
-  ## Remove non-significant edges
-  if(remove_nonsignificant==TRUE){
-    if(EBICglasso==TRUE){
-      stop("Removal of non-significant edges based on p-values cannot be combined with EBIC-glasso regularization.")
+
+  # Helper: apply significance threshold pruning
+  apply_p_threshold <- function(R, P, alpha, method = remove_nonsignificant_method) {
+    if (is.null(P)) return(R)
+
+    method <- match.arg(method)
+
+    # work on off-diagonal p-values only
+    off <- upper.tri(P) | lower.tri(P)
+    pvec <- P[off]
+
+    # treat NA/non-finite p-values as "not significant"
+    bad <- !is.finite(pvec)
+    pvec2 <- pvec
+    pvec2[bad] <- 1
+
+    if (method == "bh") {
+      pvec2 <- stats::p.adjust(pvec2, method = "BH")
     }
-    if(!(is.null(weights))){
-      stop("Removal of non-significant edges is not compatible with weighted correlation estimation.")
+
+    keep_vec <- pvec2 <= alpha
+
+    # Build keep matrix
+    keep <- matrix(FALSE, nrow(R), ncol(R))
+    keep[off] <- keep_vec
+    diag(keep) <- TRUE
+
+    R2 <- R
+    R2[!keep] <- 0
+    R2
+  }
+
+  # helper: polychoric/tetrachoric on dummy-coded data
+  tetrachoric_matrix <- function(X,
+                                 missing = c("pairwise", "listwise"),
+                                 item_id = NULL,
+                                 correct = 0.5) {
+    missing <- match.arg(missing)
+    X <- as.data.frame(X)
+
+    if (missing == "listwise") {
+      X <- X[stats::complete.cases(X), , drop = FALSE]
     }
-    if(cor_method=="auto"){
-      cor_method <- "pearson"
+
+    p <- ncol(X)
+    R <- matrix(0, p, p)
+    diag(R) <- 1
+    colnames(R) <- colnames(X)
+    rownames(R) <- colnames(X)
+
+    if (p < 2L) return(R)
+
+    # define once (not inside loop)
+    quiet_tetrachoric_pair <- function(xij, correct = 0.5) {
+      old_mc <- getOption("mc.cores")
+      options(mc.cores = 1L)
+      on.exit(options(mc.cores = old_mc), add = TRUE)
+
+      tc_ij <- NULL
+
+      invisible(
+        utils::capture.output(
+          utils::capture.output(
+            tc_ij <- suppressWarnings(
+              tryCatch(
+                psych::tetrachoric(xij, correct = correct),
+                error = function(e) NULL
+              )
+            ),
+            type = "message"
+          ),
+          type = "output"
+        )
+      )
+
+      tc_ij
     }
-    if(cor_method %in% c("pearson", "kendall", "spearman")) {
-      res_corrtest <- psych::corr.test(df_dummies, method = cor_method, use = "pairwise.complete.obs", alpha = sign_threshold, adjust = "none")
-      res_corrtest$r[res_corrtest$p>sign_threshold] <- 0
-      res_in_cor <- res_corrtest$r
+
+    # upper triangle only
+    for (j in 2:p) {
+      for (i in 1:(j - 1)) {
+
+        if (!is.null(item_id) && item_id[i] == item_id[j]) next
+
+        if (missing == "pairwise") {
+          ok <- stats::complete.cases(X[[i]], X[[j]])
+          xij <- X[ok, c(i, j), drop = FALSE]
+        } else {
+          xij <- X[, c(i, j), drop = FALSE]
+        }
+
+        if (nrow(xij) < 2L) {
+          R[i, j] <- NA_real_
+          next
+        }
+
+        if (length(unique(xij[[1]])) < 2L || length(unique(xij[[2]])) < 2L) {
+          R[i, j] <- NA_real_
+          next
+        }
+
+        tc_ij <- quiet_tetrachoric_pair(xij, correct = correct)
+
+        if (is.null(tc_ij) || is.null(tc_ij$rho) || !is.matrix(tc_ij$rho)) {
+          R[i, j] <- NA_real_
+          next
+        }
+
+        R[i, j] <- tc_ij$rho[1, 2]
+      }
+    }
+
+    # mirror upper -> lower
+    R[lower.tri(R)] <- t(R)[lower.tri(R)]
+
+    R[is.na(R)] <- 0
+    diag(R) <- 1
+
+    R
+  }
+
+  # Scenario metadata
+  has_weights <- !is.null(weights)
+  need_pvals  <- isTRUE(remove_nonsignificant)
+
+  cor_method_requested <- cor_method
+  cor_method_used <- cor_method
+  cor_backend <- NA_character_
+  cor_fallback_note <- NULL
+  p_backend <- NA_character_
+
+  # Polychoric support currently only for C1/C2:
+  ## no weights + no significance filtering + pairwise/listwise missing
+  if (cor_method == "polychoric" && (has_weights || need_pvals)) {
+    cor_method_used <- "pearson"
+    cor_fallback_note <- paste0(
+      "Requested cor_method='polychoric' with ",
+      if (has_weights) "weights" else "no weights",
+      " and ",
+      if (need_pvals) "remove_nonsignificant=TRUE" else "remove_nonsignificant=FALSE",
+      ". This combination is not yet supported for polychoric/tetrachoric estimation; ",
+      "falling back to Pearson correlations."
+    )
+    warning(cor_fallback_note, call. = FALSE)
+  }
+
+  # Objects produced by the correlation engine
+  res_in_cor <- NULL
+  res_in_p   <- NULL
+  cor_engine_details <- list()
+
+  # Dispatch
+  if (cor_method_used == "polychoric") {
+
+    # C1/C2 only (unweighted, no p-values)
+    cor_backend <- "psych::tetrachoric"
+    p_backend <- "not computed"
+
+    res_in_cor <- tetrachoric_matrix(
+      df_dummies, missing = missing_cor,
+      item_id = item_id_per_dummycol,
+      correct = 0.5)
+
+    res_in_p   <- NULL
+
+  } else {
+    # Pearson correlation routes
+
+    if (!has_weights && !need_pvals) {
+      cor_backend <- "stats::cor"
+      p_backend <- "not computed"
+
+      if (missing_cor == "pairwise") {
+        res_in_cor <- stats::cor(df_dummies, method = "pearson", use = "pairwise.complete.obs")
+      } else {
+        res_in_cor <- stats::cor(df_dummies, method = "pearson", use = "complete.obs")
+      }
+
+      res_in_p <- NULL
+    }
+
+    if (!has_weights && need_pvals) {
+      cor_backend <- "psych::corr.test"
+      p_backend <- "psych::corr.test"
+
+      if (missing_cor == "pairwise") {
+        ct <- psych::corr.test(df_dummies,
+                               method = "pearson",
+                               use = "pairwise.complete.obs",
+                               adjust = "none")
+      } else {
+        cc <- stats::complete.cases(df_dummies)
+        ct <- psych::corr.test(df_dummies[cc, , drop = FALSE],
+                               method = "pearson",
+                               use = "pairwise.complete.obs", # no missings remain after cc subset
+                               adjust = "none")
+      }
+
+      res_in_cor <- ct$r
+      res_in_p   <- ct$p
+      res_in_cor <- apply_p_threshold(res_in_cor, res_in_p, sign_threshold,
+                                      method = remove_nonsignificant_method)
+    }
+
+    if (has_weights && !need_pvals) {
+      cor_backend <- "ResIN internal weighted Pearson"
+      p_backend <- "not computed"
+
+      wp <- weighted_pearson_matrix(
+        X = df_dummies,
+        w = weights,
+        missing = missing_cor,
+        need_p = FALSE,
+        item_id = item_id_per_dummycol
+      )
+
+      res_in_cor <- wp$r
+      res_in_p   <- NULL
+    }
+
+    if (has_weights && need_pvals) {
+      cor_backend <- "ResIN internal weighted Pearson"
+      p_backend <- "ResIN internal approximate weighted Pearson p-values"
+
+      wp <- weighted_pearson_matrix(
+        X = df_dummies,
+        w = weights,
+        missing = missing_cor,
+        need_p = TRUE,
+        item_id = item_id_per_dummycol
+      )
+
+      res_in_cor <- wp$r
+      res_in_p   <- wp$p
+      res_in_cor <- apply_p_threshold(res_in_cor, res_in_p, sign_threshold,
+                                      method = remove_nonsignificant_method)
+
+      cor_engine_details$n_pair_matrix <- wp$n_pair
+      cor_engine_details$n_eff_matrix  <- wp$n_eff
+      cor_engine_details$p_values_are_approximate <- TRUE
     }
   }
+
+  if(!is.null(weights)) {
+  cor_engine_details$weights_from_df <- weights_from_df
+  cor_engine_details$weights_name <- weights_name
+  }
+
+  # Safety check
+  if (is.null(res_in_cor) || !is.matrix(res_in_cor)) {
+    stop("Correlation backend failed to return a valid correlation matrix.", call. = FALSE)
+  }
+
+  # Ensure dimnames
+  colnames(res_in_cor) <- colnames(df_dummies)
+  rownames(res_in_cor) <- colnames(df_dummies)
+
+  if (!is.null(res_in_p)) {
+    colnames(res_in_p) <- colnames(df_dummies)
+    rownames(res_in_p) <- colnames(df_dummies)
   }
 
   ## Set all inner-variable correlations to 0
-  j <- 1 ; i <- 1
-  while(i <= ncol(df_nodes)) {
-    res_in_cor[j:((j+length(levels(factor(df_nodes[, i]))))-1),
-               j:((j+length(levels(factor(df_nodes[, i]))))-1)] <- 0
-    j <- j+length(levels(factor(df_nodes[, i]))); i <- i+1
+  for (idx in item_blocks) {
+    res_in_cor[idx, idx] <- 0
+    if (!is.null(res_in_p)) res_in_p[idx, idx] <- 0
   }
 
   ## Removing NA's and negatives
-  if(remove_negative==TRUE) {
-    if(neg_offset>0 & neg_offset<1) {
-      res_in_cor[res_in_cor<0] <- res_in_cor[res_in_cor<0]+neg_offset
+  if (remove_negative == TRUE) {
+    if (offset > 1 | offset < -1) {
+      stop("Argument offset must be a numeric value between -1 and 1", call. = FALSE)
     }
-    res_in_cor[res_in_cor<0] <- 0
+    if (offset != 0) {
+      res_in_cor[res_in_cor < 0] <- res_in_cor[res_in_cor < 0] + offset
+    }
+    res_in_cor[res_in_cor < 0] <- 0
   }
   res_in_cor[is.na(res_in_cor)] <- 0
 
   ## Creating the same-items list
-  same_items <- rep(NA, ncol(res_in_cor))
-  j <- 1 ; i <- 1
-  while(i <= ncol(df_nodes)) {
-    same_items[j:((j+length(levels(factor(df_nodes[, i]))))-1)] <- i
-    j <- j+length(levels(factor(df_nodes[, i]))); i <- i+1
-  }
-  same_items <- as.factor(same_items)
+  same_items <- factor(item_id_per_dummycol, levels = seq_len(ncol(df_nodes)))
   levels(same_items) <- colnames(df_nodes)
 
   ## Generating the qgraph and igraph objects
   ResIN_igraph <- igraph::graph_from_adjacency_matrix(res_in_cor, mode = "undirected", weighted = TRUE, diag = FALSE)
   ResIN_qgraph <- qgraph::qgraph(res_in_cor, DoNotPlot = TRUE, layout = "spring", labels = rownames(res_in_cor))
-
 
   ## Force directed algorithm and principle component rotation
   if(remove_negative==FALSE) {
@@ -339,7 +837,7 @@ ResIN <- function(df, node_vars = NULL, left_anchor = NULL, cor_method = "pearso
     colnames(cluster_probs) <- paste0("cluster_", names(table(node_frame$cluster)))
 
     ### Maximum probability assignment
-    temp_probs <- cluster_probs + rnorm(nrow(cluster_probs)*ncol(cluster_probs), 0, 0.001)
+    temp_probs <- cluster_probs + stats::rnorm(nrow(cluster_probs)*ncol(cluster_probs), 0, 0.001)
     temp_probs <- dplyr::mutate(temp_probs, max_ind = max.col(temp_probs))
     max_cluster <- temp_probs$max_ind
   } else {
@@ -349,7 +847,7 @@ ResIN <- function(df, node_vars = NULL, left_anchor = NULL, cor_method = "pearso
 
   ## Calculating summary statistics based on co-variates
   if(!(is.null(node_covars)) & !(is.null(node_costats))) {
-    if(length(node_covars) != length(node_covars)) {
+    if (length(node_covars) != length(node_costats)) {
       stop("Covariate selection and summary statistics vectors must be of equal length.")
     }
 
@@ -386,14 +884,14 @@ ResIN <- function(df, node_vars = NULL, left_anchor = NULL, cor_method = "pearso
     raw_x <- rowMeans(score_dummies_x, na.rm = TRUE)
     raw_y <- rowMeans(score_dummies_y, na.rm = TRUE)
 
-    ### helper vectors
+    ### helper vectors for score estimates
     n_items     <- rowSums(df_dummies)
     popularity  <- colSums(df_dummies)
     items_list  <- lapply(seq_len(nrow(df_dummies)),
                           function(p) which(df_dummies[p, ] == 1))
 
     ### Heuristic lambda  (rarer items -> more pooling)
-    k           <- median(popularity)
+    k           <- stats::median(popularity)
     lambda_h    <- sapply(items_list, function(Ip) {
       num <- sum(popularity[Ip])
       1 - num / (num + k)
@@ -417,7 +915,7 @@ ResIN <- function(df, node_vars = NULL, left_anchor = NULL, cor_method = "pearso
     within_var_x <- rowMeans((score_dummies_x - raw_x)^2, na.rm = TRUE)
     sigma2_x     <- mean(within_var_x, na.rm = TRUE)
     mu_x         <- mean(raw_x, na.rm = TRUE)
-    tau2_x       <- max(0, var(raw_x, na.rm = TRUE) -
+    tau2_x       <- max(0, stats::var(raw_x, na.rm = TRUE) -
                           sigma2_x * mean(1 / n_items, na.rm = TRUE))
 
     lambda_eb_x  <- (sigma2_x / n_items) / (tau2_x + sigma2_x / n_items)
@@ -427,7 +925,7 @@ ResIN <- function(df, node_vars = NULL, left_anchor = NULL, cor_method = "pearso
     within_var_y <- rowMeans((score_dummies_y - raw_y)^2, na.rm = TRUE)
     sigma2_y     <- mean(within_var_y, na.rm = TRUE)
     mu_y         <- mean(raw_y, na.rm = TRUE)
-    tau2_y       <- max(0, var(raw_y, na.rm = TRUE) -
+    tau2_y       <- max(0, stats::var(raw_y, na.rm = TRUE) -
                           sigma2_y * mean(1 / n_items, na.rm = TRUE))
 
     lambda_eb_y  <- (sigma2_y / n_items) / (tau2_y + sigma2_y / n_items)
@@ -469,7 +967,7 @@ ResIN <- function(df, node_vars = NULL, left_anchor = NULL, cor_method = "pearso
 
   if(plot_responselabels==FALSE){
   ResIN_ggplot <- ResIN_ggplot + ggplot2::geom_point(ggplot2::aes(x = node_frame$x, y = node_frame$y))
-  }else{
+  } else {
   ResIN_ggplot <- ResIN_ggplot + ggplot2::geom_text(ggplot2::aes(x = node_frame$x, y = node_frame$y, label = node_frame$node_names), size = 3.8)
   }
 
@@ -676,20 +1174,34 @@ ResIN <- function(df, node_vars = NULL, left_anchor = NULL, cor_method = "pearso
     bipartite_output <- "not generated"
   }
 
+  ## Collecting meta-information for transparency and reproducibility
+  correlation_meta <- list(
+    cor_method_requested = cor_method_requested,
+    cor_method_used = cor_method_used,
+    missing_cor = missing_cor,
+    has_weights = has_weights,
+    remove_nonsignificant = need_pvals,
+    sign_threshold = if (need_pvals) sign_threshold else NA_real_,
+    correlation_backend = cor_backend,
+    pvalue_backend = p_backend,
+    fallback_note = cor_fallback_note)
+
   ## Final bit of housekeeping
   node_frame$from <- NULL
   edgelist_frame$x <- NULL
   edgelist_frame$y <- NULL
   edgelist_frame$node_names <- NULL
 
-  # Exporting features:
+  # Exporting additional features:
   graph_stats <- list(structuration, centralization)
-  aux_objects <- list(res_in_cor, same_items, df_dummies, cluster_probs, max_cluster, ResIN_arglist)
-  names(aux_objects) <- c("adj_matrix", "same_items", "df_dummies", "cluster_probabilities", "max_clusterprob", "ResIN_arglist")
+  meta <- list(call = match.call(), created = created, seed = seed, df_id = df_id, df_n = nrow(df), df_p = ncol(df), node_vars = node_vars, correlation = correlation_meta, ResIN_version = resin_version, R_version = r_version)
+  aux_objects <- list(res_in_cor, same_items, df_dummies, cluster_probs, max_cluster, ResIN_arglist, meta = meta)
+
+  names(aux_objects) <- c("adj_matrix", "same_items", "df_dummies", "cluster_probabilities", "max_clusterprob", "ResIN_arglist", "meta_information")
   output <- list(edgelist_frame, node_frame, ResIN_ggplot, scores, graph_stats, aux_objects, bipartite_output)
   names(output) <- c("ResIN_edgelist", "ResIN_nodeframe", "ResIN_ggplot", "ResIN_scores", "graph_stats", "aux_objects", "bipartite_output")
+
   class(output) <- c("ResIN", "list")
 
   return(output)
 }
-
