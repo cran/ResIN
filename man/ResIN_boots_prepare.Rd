@@ -6,7 +6,7 @@
 \usage{
 ResIN_boots_prepare(
   ResIN_object,
-  n = 10000,
+  n = 1000,
   boots_type = "resample",
   resample_size = NULL,
   weights = NULL,
@@ -48,10 +48,11 @@ ResIN_obj <- ResIN(lik_data, network_stats = TRUE,
 
 \donttest{
 # Prepare for bootstrapping
-prepped_boots <- ResIN_boots_prepare(ResIN_obj, n=100, boots_type="resample")
+prepped_boots <- ResIN_boots_prepare(ResIN_obj, n=50, boots_type="resample")
 
 # Execute the prepared bootstrap list
-executed_boots <-  ResIN_boots_execute(prepped_boots, parallel = TRUE, detect_cores = TRUE)
+executed_boots <-  ResIN_boots_execute(prepped_boots, parallel = TRUE,
+                      detect_cores = TRUE, verbose = FALSE)
 
 # Extract results - here for example, the network (global)-clustering coefficient
 ResIN_boots_extract(executed_boots, what = "global_clustering", summarize_results = TRUE)

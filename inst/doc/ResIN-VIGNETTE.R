@@ -14,17 +14,7 @@ BrJSocPsychol_2024 <- ResIN::BrJSocPsychol_2024
 
 ## Sub-setting and re-coding items in a liberal-conservative direction
 Core_Items <- BrJSocPsychol_2024 %>% dplyr::select(Q9_1, Q9_2, Q9_3, Q9_4, 
-                                                   Q9_5, Q9_6, Q9_7, Q9_8) %>% 
-   dplyr::mutate(Q9_1 = recode(Q9_1, "Strongly Disagree" = "Strongly Agree",
-                                     "Somewhat Disagree" = "Somewhat Agree",
-                                     "Neutral" = "Neutral",
-                                     "Somewhat Agree" = "Somewhat Disagree",
-                                     "Strongly Agree" = "Strongly Disagree"),
-                Q9_3 = recode(Q9_3,  "Strongly Disagree" = "Strongly Agree",
-                                     "Somewhat Disagree" = "Somewhat Agree",
-                                     "Neutral" = "Neutral",
-                                     "Somewhat Agree" = "Somewhat Disagree",
-                                     "Strongly Agree" = "Strongly Disagree"))
+                                                   Q9_5, Q9_6, Q9_7, Q9_8)
 
 ## Relabeling the attitudes
 colnames(Core_Items) <- c("legal_abort", "equalize_incomes", "keep_immigrants", 
@@ -41,10 +31,10 @@ Core_Items <- Core_Items %>%
     "Strongly Disagree" = "--",
   )))
 
-Core_Items$dem_bias  <- as.numeric(BrJSocPsychol_2024$Q15_1) - as.numeric(BrJSocPsychol_2024$Q15_2)
+Core_Items$dem_bias  <- as.numeric(BrJSocPsychol_2024$Q15_1) -
+  as.numeric(BrJSocPsychol_2024$Q15_2)
 
 ## Separately specifying attitude nodes and covariate here:
-
 ResIN_out <- ResIN(Core_Items,
                    node_vars = c("legal_abort", "equalize_incomes", "keep_immigrants",
                                  "welfare_spending", "gay_marriage", "protect_environ",
@@ -69,17 +59,7 @@ BrJSocPsychol_2024 <- ResIN::BrJSocPsychol_2024
 
 ## Sub-setting and re-coding items in a liberal-conservative direction
 Core_Items <- BrJSocPsychol_2024 %>% dplyr::select(Q9_1, Q9_2, Q9_3, Q9_4, 
-                                                   Q9_5, Q9_6, Q9_7, Q9_8) %>% 
-   dplyr::mutate(Q9_1 = dplyr::recode(Q9_1, "Strongly Disagree" = "Strongly Agree",
-                                     "Somewhat Disagree" = "Somewhat Agree",
-                                     "Neutral" = "Neutral",
-                                     "Somewhat Agree" = "Somewhat Disagree",
-                                     "Strongly Agree" = "Strongly Disagree"),
-                Q9_3 = dplyr::recode(Q9_3,  "Strongly Disagree" = "Strongly Agree",
-                                     "Somewhat Disagree" = "Somewhat Agree",
-                                     "Neutral" = "Neutral",
-                                     "Somewhat Agree" = "Somewhat Disagree",
-                                     "Strongly Agree" = "Strongly Disagree"))
+                                                   Q9_5, Q9_6, Q9_7, Q9_8)
 
 ## Relabeling the attitudes
 colnames(Core_Items) <- c("legal_abort", "equalize_incomes", "keep_immigrants", 
@@ -125,8 +105,7 @@ ResIN_out <- ResIN(Core_Items, plot_whichstat = "choices",
                    plot_title = "BrJSocPsychol 2024 ResIN Network",
                    left_anchor = "legal_abort_++", seed = 22)
 
-
-## ----fig.width = 7.2, fig.height = 4------------------------------------------
+## ----fig.width = 16, fig.height = 8-------------------------------------------
 ## Using leading eigenvalue by default:
 ResIN_out <- ResIN(Core_Items, detect_clusters = TRUE, plot_whichstat = "cluster", 
                    plot_responselabels = FALSE, plot_title = "Leading eigenvalue community detection",
@@ -138,7 +117,6 @@ ResIN_out <- ResIN(Core_Items, detect_clusters = TRUE, plot_whichstat = "cluster
                    plot_title = "Fast and greedy community detection",
                    color_palette = "Set1", seed = 22, left_anchor = "legal_abort_++")
 
-
 ## -----------------------------------------------------------------------------
 head(ResIN_out$aux_objects$cluster_probabilities)
 
@@ -146,7 +124,6 @@ head(ResIN_out$aux_objects$cluster_probabilities)
 ResIN_out <- ResIN(Core_Items, plot_whichstat = "Betweenness", plot_responselabels = TRUE, 
                    plot_title = "ResIN node betweenness centrality", seed = 22, color_palette = "Greens",
                    left_anchor = "legal_abort_++")
-
 
 ## ----warning=FALSE, fig.width = 7.2, fig.height = 4---------------------------
 ResIN_out <- ResIN(Core_Items, detect_clusters = TRUE, plot_whichstat = "cluster",
@@ -278,11 +255,12 @@ ResIN_out <- ResIN(Core_Items, node_vars = c("legal_abort", "equalize_incomes",
                                              "keep_immigrants", "welfare_spending",
                                              "gay_marriage", "protect_environ",
                                              "gun_control", "aid_blacks"), 
+                   left_anchor = "legal_abort_++",
                    seed = 36,
                    plot_ggplot = FALSE,
-                   bipartite = TRUE)
+                   multimodal = TRUE)
 
-ResIN_out$bipartite_output$bipartite_ggraph
+ResIN_out$multimodal_output$multimodal_ggraph
 
 ## -----------------------------------------------------------------------------
 ## Easily convert a ResIN object to igraph:

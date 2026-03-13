@@ -8,23 +8,26 @@ ResIN_boots_execute(
   ResIN_boots_prepped,
   parallel = FALSE,
   detect_cores = TRUE,
-  core_offset = 0L,
+  core_offset = 1L,
   n_cores = 2L,
-  inorder = FALSE
+  inorder = FALSE,
+  verbose = TRUE
 )
 }
 \arguments{
 \item{ResIN_boots_prepped}{A \code{"ResIN_boots_prepped"} bootstrap plan (output of \code{\link{ResIN_boots_prepare}}).}
 
-\item{parallel}{Should execution use parallelism via \code{foreach} + a PSOCK cluster? Defaults to FALSE.}
+\item{parallel}{Logical; should execution use parallelism via \code{foreach} + a PSOCK cluster? Defaults to FALSE.}
 
-\item{detect_cores}{Should available CPU cores be detected automatically? Defaults to TRUE (ignored when \code{parallel = FALSE}).}
+\item{detect_cores}{Logical; should available CPU cores be detected automatically? Defaults to TRUE (ignored when \code{parallel = FALSE}).}
 
-\item{core_offset}{Integer offset subtracted from the number of detected cores. Defaults to 0L.}
+\item{core_offset}{Integer offset subtracted from the number of detected cores. Defaults to 1L. Change to 0L on low-overhead systems or if sure that system won't stall.}
 
 \item{n_cores}{Manually specify number of cores (ignored if \code{detect_cores = TRUE} or \code{parallel = FALSE}).}
 
-\item{inorder}{Should parallel execution preserve sequential ordering? Defaults to FALSE.}
+\item{inorder}{Logical; should parallel execution preserve sequential ordering? Defaults to FALSE.}
+
+\item{verbose}{Logical; should the type of computational execution (parallel or sequential), the parallel engine (if any) and the number of cores be returned to the dashboard while the function is running?}
 }
 \value{
 An object of class \code{"ResIN_boots_executed"} containing \code{n} bootstrapped
@@ -46,10 +49,11 @@ ResIN_obj <- ResIN(lik_data, network_stats = TRUE,
 
 \donttest{
 # Prepare for bootstrapping
-prepped_boots <- ResIN_boots_prepare(ResIN_obj, n=100, boots_type="resample")
+prepped_boots <- ResIN_boots_prepare(ResIN_obj, n=50, boots_type="resample")
 
 # Execute the prepared bootstrap list
-executed_boots <-  ResIN_boots_execute(prepped_boots, parallel = TRUE, detect_cores = TRUE)
+executed_boots <-  ResIN_boots_execute(prepped_boots, parallel = TRUE,
+                      detect_cores = TRUE, verbose = FALSE)
 
 # Extract results - here for example, the network (global)-clustering coefficient
 ResIN_boots_extract(executed_boots, what = "global_clustering", summarize_results = TRUE)
